@@ -1,16 +1,15 @@
 <?php
 /*
   Envío de formularios por SMTP directo (sin mail() y sin servicios de terceros).
-  PHP mail() no funciona en Vercel, así que el sitio se conecta al servidor SMTP de la
-  cuenta de correo del negocio y se envía el aviso a sí mismo.
+  PHP mail() no funciona en Vercel, así que el sitio inicia sesión en el servidor SMTP
+  configurado (SMTP_USER) y envía cada formulario a MAIL_TO.
 
   Variables de entorno (Vercel → Project → Settings → Environment Variables):
-    SMTP_PASS  (obligatoria) contraseña de aplicación de Gmail de $Mail
-               https://myaccount.google.com/apppasswords (requiere verificación en 2 pasos)
-    SMTP_HOST  opcional, por defecto smtp.gmail.com
-    SMTP_PORT  opcional, por defecto 465 (TLS directo). 587 o 2525 usan STARTTLS si el servidor lo ofrece.
-    SMTP_USER  opcional, por defecto $Mail
-    MAIL_TO    opcional, por defecto $Mail
+    SMTP_HOST      servidor SMTP (ej. smtp.office365.com; por defecto smtp.gmail.com)
+    SMTP_PORT      465 = TLS directo; 587 = STARTTLS (por defecto 465)
+    SMTP_USER      cuenta que inicia sesión y envía (por defecto $Mail)
+    SMTP_PASSWORD  (obligatoria) contraseña de esa cuenta. Nunca se guarda en el repo.
+    MAIL_TO        quién recibe los formularios (por defecto $Mail)
 */
 
 function smtpConfig(): array
@@ -20,7 +19,7 @@ function smtpConfig(): array
         'host' => getenv('SMTP_HOST') ?: 'smtp.gmail.com',
         'port' => (int) (getenv('SMTP_PORT') ?: 465),
         'user' => getenv('SMTP_USER') ?: (string) $Mail,
-        'pass' => (string) getenv('SMTP_PASS'),
+        'pass' => (string) getenv('SMTP_PASSWORD'),
         'to'   => getenv('MAIL_TO') ?: (string) $Mail,
     ];
 }
@@ -57,7 +56,7 @@ function sendFormEmail(array $fields, string $subject): bool
     global $Company;
     $cfg = smtpConfig();
     if ($cfg['pass'] === '') {
-        error_log('[form] SMTP_PASS is not set; message not sent.');
+        error_log('[form] SMTP_PASSWORD is not set; message not sent.');
         return false;
     }
 
