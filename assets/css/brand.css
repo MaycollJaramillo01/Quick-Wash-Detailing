@@ -1,0 +1,53 @@
+/*
+  Quick Wash Detailing — ajustes finales de marca.
+  Se carga después de los estilos de la plantilla; los !important existen porque
+  cada sección de la plantilla trae su propio <style> con títulos en mayúsculas y
+  tamaños pensados para Oswald (fuente condensada).
+*/
+
+/* Tipografía: Poppins en títulos, Inter en texto, sin mayúsculas forzadas */
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display) !important;
+    text-transform: none !important;
+    letter-spacing: -0.015em !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+}
+
+h1 { font-size: clamp(2rem, 4.2vw, 3.25rem) !important; }
+h2 { font-size: clamp(1.75rem, 3.2vw, 2.6rem) !important; }
+h3 { font-size: clamp(1.1rem, 1.6vw, 1.35rem) !important; }
+h4, h5, h6 { font-size: 1.05rem !important; }
+
+#hero-slide-title { font-size: clamp(2.1rem, 4.6vw, 3.6rem) !important; }
+.page-hero h1 { font-size: clamp(2.1rem, 4.6vw, 3.4rem) !important; }
+
+/* Títulos "outline" de la galería: sin trazo hueco, texto sólido legible */
+.pinova-title span {
+    font-size: inherit !important;
+    text-transform: none !important;
+    -webkit-text-stroke: 0 !important;
+}
+.pinova-title .pinova-title-solid { color: #ffffff !important; }
+.pinova-title .pinova-title-solid--accent { color: var(--brand-accent) !important; }
+.pinova-title .pinova-title-outline { color: rgba(255, 255, 255, 0.55) !important; }
+
+body, p, li, input, select, textarea, button {
+    font-family: var(--font-body);
+}
+
+/* Menú principal en tipo normal */
+.main-nav > ul > li > a {
+    font-family: var(--font-body) !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    font-weight: 500 !important;
+    font-size: 15px !important;
+}
+
+/* Google Translate: ocultar su barra, spinner y resaltado */
+.skiptranslate iframe, #goog-gt-tt, .goog-te-spinner-pos,
+[class^="VIpgJd-ZVi9od-"], [class*=" VIpgJd-ZVi9od-"], .VIpgJd-yAWNEb-L7lbkb {
+    display: none !important;
+}
+.goog-text-highlight { background: none !important; box-shadow: none !important; }
