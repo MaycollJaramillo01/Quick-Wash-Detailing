@@ -2,8 +2,8 @@
 /*
   Verificación de formularios (cotización + reseñas) contra un servidor corriendo.
   Uso:  php tests/forms-check.php http://localhost:8000
-  Para no mandar correos reales, levantar el sitio con FORM_ENDPOINT apuntando a un mock
-  que responda {"success":"true"} (ver .claude/launch.json).
+  Para no mandar correos reales: correr tests/smtp-mock.php y levantar el sitio con
+  SMTP_HOST=127.0.0.1 SMTP_PORT=2525 SMTP_PASS=<valor de prueba> (ver .claude/launch.json).
 */
 $base = rtrim($argv[1] ?? 'http://localhost:8000', '/');
 $jar = tempnam(sys_get_temp_dir(), 'qw');

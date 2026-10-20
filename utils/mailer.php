@@ -1,59 +1,119 @@
 <?php
 /*
-  Envío de formularios por FormSubmit (https://formsubmit.co).
-  PHP mail() no funciona en Vercel, así que el servidor reenvía los datos a FormSubmit,
-  que los entrega por correo a $Mail.
+  Envío de formularios por SMTP directo (sin mail() y sin servicios de terceros).
+  PHP mail() no funciona en Vercel, así que el sitio se conecta al servidor SMTP de la
+  cuenta de correo del negocio y se envía el aviso a sí mismo.
 
-  - La PRIMERA vez que se usa, FormSubmit manda un correo "Activate Form" a $Mail.
-    Hasta que el cliente haga clic en "Activate", los envíos devuelven error.
-  - Después de activar, FormSubmit da un alias aleatorio: se puede poner en la variable
-    de entorno FORM_ENDPOINT (https://formsubmit.co/ajax/<alias>) para no exponer el correo.
+  Variables de entorno (Vercel → Project → Settings → Environment Variables):
+    SMTP_PASS  (obligatoria) contraseña de aplicación de Gmail de $Mail
+               https://myaccount.google.com/apppasswords (requiere verificación en 2 pasos)
+    SMTP_HOST  opcional, por defecto smtp.gmail.com
+    SMTP_PORT  opcional, por defecto 465 (TLS directo). 587 o 2525 usan STARTTLS si el servidor lo ofrece.
+    SMTP_USER  opcional, por defecto $Mail
+    MAIL_TO    opcional, por defecto $Mail
 */
 
-function formEndpoint(): string
+function smtpConfig(): array
 {
     global $Mail;
-    return getenv('FORM_ENDPOINT') ?: 'https://formsubmit.co/ajax/' . rawurlencode((string) $Mail);
+    return [
+        'host' => getenv('SMTP_HOST') ?: 'smtp.gmail.com',
+        'port' => (int) (getenv('SMTP_PORT') ?: 465),
+        'user' => getenv('SMTP_USER') ?: (string) $Mail,
+        'pass' => (string) getenv('SMTP_PASS'),
+        'to'   => getenv('MAIL_TO') ?: (string) $Mail,
+    ];
 }
 
-/** Envía $fields por correo. Devuelve true solo si FormSubmit confirma el envío. */
+/** Lee una respuesta SMTP (posiblemente multilínea) y verifica el código esperado. */
+function smtpExpect($fp, string $code): string
+{
+    $reply = '';
+    while (($line = fgets($fp, 1024)) !== false) {
+        $reply .= $line;
+        if (strlen($line) < 4 || $line[3] !== '-') break;
+    }
+    if (strncmp($reply, $code, 3) !== 0) {
+        throw new RuntimeException('SMTP expected ' . $code . ', got: ' . trim($reply));
+    }
+    return $reply;
+}
+
+function smtpSend($fp, string $command, string $code): string
+{
+    fwrite($fp, $command . "\r\n");
+    return smtpExpect($fp, $code);
+}
+
+/** Codifica un encabezado con UTF-8 y quita saltos de línea (evita inyección de encabezados). */
+function mimeHeader(string $value): string
+{
+    return '=?UTF-8?B?' . base64_encode(str_replace(["\r", "\n"], ' ', $value)) . '?=';
+}
+
+/** Envía $fields por correo. Devuelve true solo si el servidor SMTP aceptó el mensaje. */
 function sendFormEmail(array $fields, string $subject): bool
 {
-    global $BaseURL, $Company;
-
-    $payload = $fields + [
-        '_subject' => $subject,
-        '_template' => 'table',
-        '_captcha' => 'false',
-    ];
-    if (!empty($fields['email'])) $payload['_replyto'] = $fields['email'];
-
-    $ch = curl_init(formEndpoint());
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Accept: application/json',
-            // FormSubmit asocia el formulario al sitio por Referer/Origin.
-            'Referer: ' . $BaseURL,
-            'Origin: ' . rtrim((string) $BaseURL, '/'),
-        ],
-        CURLOPT_USERAGENT => ($Company ?? 'Website') . ' contact form',
-    ]);
-    $response = curl_exec($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    $json = is_string($response) ? json_decode($response, true) : null;
-    $ok = $status === 200 && is_array($json) && in_array($json['success'] ?? null, [true, 'true'], true);
-    if (!$ok) {
-        error_log('[form] send failed: HTTP ' . $status . ' ' . ($curlError ?: (string) $response));
+    global $Company;
+    $cfg = smtpConfig();
+    if ($cfg['pass'] === '') {
+        error_log('[form] SMTP_PASS is not set; message not sent.');
+        return false;
     }
-    return $ok;
+
+    $lines = [];
+    foreach ($fields as $label => $value) {
+        $lines[] = ucfirst((string) $label) . ': ' . (string) $value;
+    }
+    $replyTo = filter_var($fields['email'] ?? '', FILTER_VALIDATE_EMAIL) ?: '';
+    $headers = [
+        'Date: ' . date(DATE_RFC2822),
+        'From: ' . mimeHeader(($Company ?? 'Website') . ' Website') . ' <' . $cfg['user'] . '>',
+        'To: <' . $cfg['to'] . '>',
+        'Subject: ' . mimeHeader($subject),
+        'Message-ID: <' . bin2hex(random_bytes(12)) . '@' . (parse_url((string) ($GLOBALS['BaseURL'] ?? ''), PHP_URL_HOST) ?: 'localhost') . '>',
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+    ];
+    if ($replyTo !== '') $headers[] = 'Reply-To: <' . $replyTo . '>';
+    // Cuerpo en base64: no hay líneas que empiecen con "." ni problemas de acentos.
+    $message = implode("\r\n", $headers) . "\r\n\r\n" . chunk_split(base64_encode(implode("\n", $lines)), 76, "\r\n");
+
+    $tls = $cfg['port'] === 465;
+    $fp = @stream_socket_client(($tls ? 'ssl://' : 'tcp://') . $cfg['host'] . ':' . $cfg['port'], $errno, $errstr, 15);
+    if (!$fp) {
+        error_log('[form] SMTP connect failed: ' . $errno . ' ' . $errstr);
+        return false;
+    }
+    stream_set_timeout($fp, 15);
+
+    try {
+        $ehlo = 'EHLO ' . (gethostname() ?: 'localhost');
+        smtpExpect($fp, '220');
+        $caps = smtpSend($fp, $ehlo, '250');
+        if (!$tls && stripos($caps, 'STARTTLS') !== false) {
+            smtpSend($fp, 'STARTTLS', '220');
+            if (!stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                throw new RuntimeException('STARTTLS negotiation failed');
+            }
+            smtpSend($fp, $ehlo, '250');
+        }
+        smtpSend($fp, 'AUTH LOGIN', '334');
+        smtpSend($fp, base64_encode($cfg['user']), '334');
+        smtpSend($fp, base64_encode($cfg['pass']), '235');
+        smtpSend($fp, 'MAIL FROM:<' . $cfg['user'] . '>', '250');
+        smtpSend($fp, 'RCPT TO:<' . $cfg['to'] . '>', '250');
+        smtpSend($fp, 'DATA', '354');
+        smtpSend($fp, $message . "\r\n.", '250');
+        fwrite($fp, "QUIT\r\n"); // el mensaje ya fue aceptado; la respuesta a QUIT no importa
+        return true;
+    } catch (Throwable $e) {
+        error_log('[form] ' . $e->getMessage());
+        return false;
+    } finally {
+        fclose($fp);
+    }
 }
 
 /** Normaliza texto de un campo de formulario (sin etiquetas, recortado). */
